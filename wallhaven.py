@@ -20,13 +20,14 @@ class Wallpaper:
     url: str
     category: str
     purity: str
+    kind: str = 'fresh'
     destination_path: Path = None
 
     bgsetting = Gio.Settings.new("org.gnome.desktop.background")
 
     @property
     def filename(self):
-        path = Path(self.destination_path, "fresh", self.category)
+        path = Path(self.destination_path, self.kind, self.category)
         suffix = Path(self.url).suffix
         fn = f"wallhaven-{self.id}-{self.purity}{suffix}"
         return path / fn
@@ -45,7 +46,9 @@ class Wallpaper:
         path = Path(filepath)
         category = path.parts[-2]
         _, wallhavenid, purity = path.stem.split("-")
-        return cls(wallhavenid, filepath, category, purity, path.parents[2])
+        wp = cls(wallhavenid, filepath, category, purity, path.parts[3], path.parents[2])
+        wp.kind = path.parts[-3]
+        return wp
 
     def set_as_background(self):
         self.bgsetting.set_string("picture-uri", f"file://{self.filename}")
