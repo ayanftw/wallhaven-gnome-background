@@ -20,10 +20,11 @@ class Wallpaper:
     url: str
     category: str
     purity: str
-    kind: str = 'fresh'
     destination_path: Path = None
+    kind: str = 'fresh'
 
     bgsetting = Gio.Settings.new("org.gnome.desktop.background")
+
 
     @property
     def filename(self):
