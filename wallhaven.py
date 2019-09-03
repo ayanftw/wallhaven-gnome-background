@@ -47,7 +47,7 @@ class Wallpaper:
         path = Path(filepath)
         category = path.parts[-2]
         _, wallhavenid, purity = path.stem.split("-")
-        wp = cls(wallhavenid, filepath, category, purity, path.parts[3], path.parents[2])
+        wp = cls(wallhavenid, filepath, category, purity, path.parents[2], path.parts[-3])
         wp.kind = path.parts[-3]
         return wp
 
