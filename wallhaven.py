@@ -5,6 +5,12 @@ import requests
 from pathlib import Path
 from dataclasses import dataclass
 from gi.repository import Gio
+import aiohttp
+import aiofiles
+import asyncio
+import backoff
+
+from aiohttp import ClientSession
 
 
 api_url = "https://wallhaven.cc/api/v1/search"
@@ -21,10 +27,9 @@ class Wallpaper:
     category: str
     purity: str
     destination_path: Path = None
-    kind: str = 'fresh'
+    kind: str = "fresh"
 
     bgsetting = Gio.Settings.new("org.gnome.desktop.background")
-
 
     @property
     def filename(self):
@@ -33,21 +38,29 @@ class Wallpaper:
         fn = f"wallhaven-{self.id}-{self.purity}{suffix}"
         return path / fn
 
-    def download(self):
+    @property
+    def wallhaven_url(self):
+        return f"https://wallhaven.cc/w/{self.id}"
+
+    @backoff.on_exception(backoff.expo, aiohttp.ClientError, max_time=60)
+    async def download(self, session):
         fn = self.filename
         fn.parent.mkdir(parents=True, exist_ok=True)
-        content = requests.get(self.url, stream=True)
-        with fn.open("wb") as f:
-            for chunk in content.iter_content():
-                if chunk:
-                    f.write(chunk)
+
+        async with session.get(self.url, raise_for_status=True) as response:
+            async with aiofiles.open(fn, "wb") as f:
+                async for data in response.content.iter_chunked(1024):
+                    await f.write(data)
+            print(f"Downloaded {self.url} -> {self.filename}")
 
     @classmethod
     def from_filepath(cls, filepath):
         path = Path(filepath)
         category = path.parts[-2]
         _, wallhavenid, purity = path.stem.split("-")
-        wp = cls(wallhavenid, filepath, category, purity, path.parents[2], path.parts[-3])
+        wp = cls(
+            wallhavenid, filepath, category, purity, path.parents[2], path.parts[-3]
+        )
         wp.kind = path.parts[-3]
         return wp
 
@@ -65,7 +78,10 @@ class Wallpaper:
         if destination is None:
             raise click.exceptions.Exit("Error: destination needs to be set")
 
-        regex = re.compile(r"^.*-{}\.\w+$".format("|".join(purity)))
+        if not isinstance(purity, (list, tuple)):
+            purity = [purity]
+
+        regex = re.compile(r"^.*-({})\.\w+$".format("|".join(purity)))
 
         def get_images(prefix):
             image_path = Path(destination) / prefix
@@ -149,18 +165,26 @@ def get_wallpapers(api_key, sorting, category, purity, destination):
     }
     resp = requests.get(api_url, params=payload).json()
 
-    with click.progressbar(resp["data"]) as bar:
-        for item in bar:
-            wallpaper = Wallpaper(
-                item["id"], item["path"], item["category"], item["purity"], destination
-            )
-            wallpaper.download()
+    wallpapers = [
+        Wallpaper(i["id"], i["path"], i["category"], i["purity"], destination)
+        for i in resp["data"]
+    ]
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(download_wallpapers(wallpapers))
+
+
+async def download_wallpapers(wallpapers):
+    async with aiohttp.ClientSession() as session:
+        tasks = [w.download(session) for w in wallpapers]
+        return await asyncio.gather(*tasks)
 
 
 @cli.command()
 def show_wallpaper():
     """Display the path of the current background"""
-    print(Wallpaper.get_current().filename)
+    wp = Wallpaper.get_current()
+    print(wp.filename)
+    print(wp.wallhaven_url)
 
 
 @cli.command()
@@ -169,6 +193,8 @@ def delete_wallpaper():
     Delete the current background image and choose another with the same category/purity
     """
     wp = Wallpaper.get_current()
+    if wp.kind != 'fresh':
+        raise click.exceptions.Exit(f"Error: {wp.filename} has been saved.")
     if wp.filename is not None:
         wp.filename.unlink()
         Wallpaper.choose_random_background(wp.category, wp.purity, wp.destination_path)
