@@ -7,7 +7,7 @@ setup(
     install_requires=[
         'Click==7.0',
         'requests==2.22.0',
-        'aiohttp==3.4.0',
+        'aiohttp==3.7.4',
         'aiofiles==0.4.0',
         'backoff==1.8.0',
     ],
